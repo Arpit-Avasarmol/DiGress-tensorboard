@@ -179,7 +179,7 @@ class QM9Dataset(InMemoryDataset):
                 # Shift onehot encoding to match atom decoder
                 x = x[:, 1:]
 
-            data = Daodeta(x=x, edge_index=edge_index, edge_attr=edge_attr, y=y, idx=i)
+            data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr, y=y, idx=i)
 
             if self.pre_filter is not None and not self.pre_filter(data):
                 continue
