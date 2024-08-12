@@ -5,7 +5,7 @@ general:
     wandb: 'online'
     resume: null            # If resume, path to ckpt file from outputs directory in main directory
     test_only: null
-    check_val_every_n_epochs: 100
+    check_val_every_n_epochs: 10
     sample_every_val: 4
     samples_to_generate: 40
     samples_to_save: 9
@@ -14,7 +14,7 @@ general:
     final_model_samples_to_save: 30
     final_model_chains_to_save: 20
 train:
-    n_epochs: 50000
+    n_epochs: 5
     batch_size: 12
     save_model: True
 model:

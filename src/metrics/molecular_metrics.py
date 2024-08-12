@@ -1,14 +1,12 @@
-from rdkit import Chem
-from torchmetrics import MeanSquaredError, MeanAbsoluteError
-
-### packages for visualization
-from src.analysis.rdkit_functions import compute_molecular_metrics
 import torch
-from torchmetrics import Metric, MetricCollection
 from torch import Tensor
-import wandb
 import torch.nn as nn
+from torchmetrics import Metric, MetricCollection, MeanSquaredError, MeanAbsoluteError
+from src.analysis.rdkit_functions import compute_molecular_metrics
+from torch.utils.tensorboard import SummaryWriter
 
+# Initialize the SummaryWriter for TensorBoard logging
+writer = SummaryWriter()
 
 class TrainMolecularMetrics(nn.Module):
     def __init__(self, remove_h):
@@ -25,8 +23,10 @@ class TrainMolecularMetrics(nn.Module):
                 to_log['train/' + key] = val.item()
             for key, val in self.train_bond_metrics.compute().items():
                 to_log['train/' + key] = val.item()
-            if wandb.run:
-                wandb.log(to_log, commit=False)
+
+            # Log metrics to TensorBoard
+            for key, val in to_log.items():
+                writer.add_scalar(key, val, global_step=0)
 
     def reset(self):
         for metric in [self.train_atom_metrics, self.train_bond_metrics]:
@@ -42,8 +42,9 @@ class TrainMolecularMetrics(nn.Module):
         for key, val in epoch_bond_metrics.items():
             to_log['train_epoch/epoch' + key] = val.item()
 
-        if wandb.run:
-            wandb.log(to_log, commit=False)
+        # Log epoch metrics to TensorBoard
+        for key, val in to_log.items():
+            writer.add_scalar(key, val, global_step=0)
 
         for key, val in epoch_atom_metrics.items():
             epoch_atom_metrics[key] = f"{val.item() :.3f}"
@@ -51,7 +52,6 @@ class TrainMolecularMetrics(nn.Module):
             epoch_bond_metrics[key] = f"{val.item() :.3f}"
 
         return epoch_atom_metrics, epoch_bond_metrics
-
 
 
 class SamplingMolecularMetrics(nn.Module):
@@ -93,7 +93,6 @@ class SamplingMolecularMetrics(nn.Module):
         if test and local_rank == 0:
             with open(r'final_smiles.txt', 'w') as fp:
                 for smiles in all_smiles:
-                    # write each item on a new line
                     fp.write("%s\n" % smiles)
                 print('All smiles saved')
 
@@ -135,21 +134,17 @@ class SamplingMolecularMetrics(nn.Module):
         edge_mae = self.edge_dist_mae.compute()
         valency_mae = self.valency_dist_mae.compute()
 
-        if wandb.run:
-            wandb.log(to_log, commit=False)
-            wandb.run.summary['Gen n distribution'] = generated_n_dist
-            wandb.run.summary['Gen node distribution'] = generated_node_dist
-            wandb.run.summary['Gen edge distribution'] = generated_edge_dist
-            wandb.run.summary['Gen valency distribution'] = generated_valency_dist
+        # Log custom metrics to TensorBoard
+        for key, val in to_log.items():
+            writer.add_scalar(key, val, global_step=current_epoch)
 
-            wandb.log({'basic_metrics/n_mae': n_mae,
-                       'basic_metrics/node_mae': node_mae,
-                       'basic_metrics/edge_mae': edge_mae,
-                       'basic_metrics/valency_mae': valency_mae}, commit=False)
+        writer.add_scalar('basic_metrics/n_mae', n_mae, global_step=current_epoch)
+        writer.add_scalar('basic_metrics/node_mae', node_mae, global_step=current_epoch)
+        writer.add_scalar('basic_metrics/edge_mae', edge_mae, global_step=current_epoch)
+        writer.add_scalar('basic_metrics/valency_mae', valency_mae, global_step=current_epoch)
 
         if local_rank == 0:
             print("Custom metrics computed.")
-        if local_rank == 0:
             valid_unique_molecules = rdkit_metrics[1]
             textfile = open(f'graphs/{name}/valid_unique_molecules_e{current_epoch}_b{val_counter}.txt', "w")
             textfile.writelines(valid_unique_molecules)
@@ -160,6 +155,7 @@ class SamplingMolecularMetrics(nn.Module):
         for metric in [self.n_dist_mae, self.node_dist_mae, self.edge_dist_mae, self.valency_dist_mae]:
             metric.reset()
 
+#writer.close()
 
 class GeneratedNDistribution(Metric):
     full_state_update = False
@@ -394,6 +390,7 @@ class BondMetrics(MetricCollection):
         mse_AR = AromaticMSE(4)
         super().__init__([mse_no_bond, mse_SI, mse_DO, mse_TR, mse_AR])
 
+writer.close()
 
 if __name__ == '__main__':
     from torchmetrics.utilities import check_forward_full_state_property

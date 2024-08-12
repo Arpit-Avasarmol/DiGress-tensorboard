@@ -7,12 +7,12 @@ general:
     test_only: null
     check_val_every_n_epochs: 100
     sample_every_val: 4
-    samples_to_generate: 40
+    samples_to_generate: 10
     samples_to_save: 9
     chains_to_save: 1
-    final_model_samples_to_generate: 40
-    final_model_samples_to_save: 30
-    final_model_chains_to_save: 20
+    final_model_samples_to_generate: 10
+    final_model_samples_to_save: 5
+    final_model_chains_to_save: 25
 train:
     n_epochs: 100000
     batch_size: 64

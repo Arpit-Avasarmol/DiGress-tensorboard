@@ -2,11 +2,13 @@ import torch
 from torch import Tensor
 import torch.nn as nn
 from torchmetrics import Metric, MeanSquaredError, MetricCollection
-import time
-import wandb
 from src.metrics.abstract_metrics import SumExceptBatchMetric, SumExceptBatchMSE, SumExceptBatchKL, CrossEntropyMetric, \
     ProbabilityMetric, NLL
+import time
+from torch.utils.tensorboard import SummaryWriter
 
+# Initialize the SummaryWriter for TensorBoard logging
+writer = SummaryWriter()
 
 class NodeMSE(MeanSquaredError):
     def __init__(self, *args):
@@ -36,8 +38,9 @@ class TrainLoss(nn.Module):
                       'train_loss/node_MSE': self.train_node_mse.compute(),
                       'train_loss/edge_MSE': self.train_edge_mse.compute(),
                       'train_loss/y_mse': self.train_y_mse.compute()}
-            if wandb.run:
-                wandb.log(to_log, commit=True)
+            
+            for key, val in to_log.items():
+                writer.add_scalar(key, val, global_step=0)
 
         return mse
 
@@ -53,10 +56,11 @@ class TrainLoss(nn.Module):
         to_log = {"train_epoch/epoch_X_mse": epoch_node_mse,
                   "train_epoch/epoch_E_mse": epoch_edge_mse,
                   "train_epoch/epoch_y_mse": epoch_y_mse}
-        if wandb.run:
-            wandb.log(to_log)
-        return to_log
+        
+        for key, val in to_log.items():
+            writer.add_scalar(key, val, global_step=0)
 
+        return to_log
 
 
 class TrainLossDiscrete(nn.Module):
@@ -101,8 +105,10 @@ class TrainLossDiscrete(nn.Module):
                       "train_loss/X_CE": self.node_loss.compute() if true_X.numel() > 0 else -1,
                       "train_loss/E_CE": self.edge_loss.compute() if true_E.numel() > 0 else -1,
                       "train_loss/y_CE": self.y_loss.compute() if true_y.numel() > 0 else -1}
-            if wandb.run:
-                wandb.log(to_log, commit=True)
+            
+            for key, val in to_log.items():
+                writer.add_scalar(key, val, global_step=0)
+
         return loss_X + self.lambda_train[0] * loss_E + self.lambda_train[1] * loss_y
 
     def reset(self):
@@ -112,15 +118,15 @@ class TrainLossDiscrete(nn.Module):
     def log_epoch_metrics(self):
         epoch_node_loss = self.node_loss.compute() if self.node_loss.total_samples > 0 else -1
         epoch_edge_loss = self.edge_loss.compute() if self.edge_loss.total_samples > 0 else -1
-        epoch_y_loss = self.train_y_loss.compute() if self.y_loss.total_samples > 0 else -1
+        epoch_y_loss = self.y_loss.compute() if self.y_loss.total_samples > 0 else -1
 
         to_log = {"train_epoch/x_CE": epoch_node_loss,
                   "train_epoch/E_CE": epoch_edge_loss,
                   "train_epoch/y_CE": epoch_y_loss}
-        if wandb.run:
-            wandb.log(to_log, commit=False)
+        
+        for key, val in to_log.items():
+            writer.add_scalar(key, val, global_step=0)
 
         return to_log
 
-
-
+writer.close()

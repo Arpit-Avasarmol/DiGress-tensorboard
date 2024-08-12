@@ -6,7 +6,7 @@ general:
     evaluate_all_checkpoints: False
     test_only: null
 train:
-    n_epochs: 2000
+    n_epochs: 10
     batch_size: 512
     save_model: True
 model:

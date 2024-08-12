@@ -2,11 +2,11 @@
 general:
     name : 'qm9_no_h'
     gpus : 1
-    wandb: 'online'
+    # wandb: 'online'
     test_only: null
     evaluate_all_checkpoints: False
 train:
-    n_epochs: 1000
+    n_epochs: 10
     batch_size: 1024
     save_model: True
 model:

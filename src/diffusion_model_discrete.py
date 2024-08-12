@@ -3,17 +3,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
 import time
-import wandb
 import os
+from torch.utils.tensorboard import SummaryWriter
 
 from models.transformer_model import GraphTransformer
-from diffusion.noise_schedule import DiscreteUniformTransition, PredefinedNoiseScheduleDiscrete,\
-    MarginalUniformTransition
+from diffusion.noise_schedule import DiscreteUniformTransition, PredefinedNoiseScheduleDiscrete, MarginalUniformTransition
 from src.diffusion import diffusion_utils
 from metrics.train_metrics import TrainLossDiscrete
 from metrics.abstract_metrics import SumExceptBatchMetric, SumExceptBatchKL, NLL
 from src import utils
 
+writer = SummaryWriter()
 
 class DiscreteDenoisingDiffusion(pl.LightningModule):
     def __init__(self, cfg, dataset_infos, train_metrics, sampling_metrics, visualization_tools, extra_features,
@@ -100,6 +100,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.best_val_nll = 1e8
         self.val_counter = 0
 
+        # Initialize the SummaryWriter for TensorBoard logging
+        self.writer = SummaryWriter()
+
     def training_step(self, data, i):
         if data.edge_index.numel() == 0:
             self.print("Found a batch with no edges. Skipping.")
@@ -126,8 +129,6 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
     def on_fit_start(self) -> None:
         self.train_iterations = len(self.trainer.datamodule.train_dataloader())
         self.print("Size of the input features", self.Xdim, self.Edim, self.ydim)
-        if self.local_rank == 0:
-            utils.setup_wandb(self.cfg)
 
     def on_train_epoch_start(self) -> None:
         self.print("Starting train epoch...")
@@ -165,12 +166,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
     def on_validation_epoch_end(self) -> None:
         metrics = [self.val_nll.compute(), self.val_X_kl.compute() * self.T, self.val_E_kl.compute() * self.T,
                    self.val_X_logp.compute(), self.val_E_logp.compute()]
-        if wandb.run:
-            wandb.log({"val/epoch_NLL": metrics[0],
-                       "val/X_kl": metrics[1],
-                       "val/E_kl": metrics[2],
-                       "val/X_logp": metrics[3],
-                       "val/E_logp": metrics[4]}, commit=False)
+
+        # Log validation metrics to TensorBoard
+        self.writer.add_scalar("val/epoch_NLL", metrics[0], self.current_epoch)
+        self.writer.add_scalar("val/X_kl", metrics[1], self.current_epoch)
+        self.writer.add_scalar("val/E_kl", metrics[2], self.current_epoch)
+        self.writer.add_scalar("val/X_logp", metrics[3], self.current_epoch)
+        self.writer.add_scalar("val/E_logp", metrics[4], self.current_epoch)
 
         self.print(f"Epoch {self.current_epoch}: Val NLL {metrics[0] :.2f} -- Val Atom type KL {metrics[1] :.2f} -- ",
                    f"Val Edge type KL: {metrics[2] :.2f}")
@@ -220,8 +222,6 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.test_E_kl.reset()
         self.test_X_logp.reset()
         self.test_E_logp.reset()
-        if self.local_rank == 0:
-            utils.setup_wandb(self.cfg)
 
     def test_step(self, data, i):
         dense_data, node_mask = utils.to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
@@ -236,20 +236,18 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         """ Measure likelihood on a test set and compute stability metrics. """
         metrics = [self.test_nll.compute(), self.test_X_kl.compute(), self.test_E_kl.compute(),
                    self.test_X_logp.compute(), self.test_E_logp.compute()]
-        if wandb.run:
-            wandb.log({"test/epoch_NLL": metrics[0],
-                       "test/X_kl": metrics[1],
-                       "test/E_kl": metrics[2],
-                       "test/X_logp": metrics[3],
-                       "test/E_logp": metrics[4]}, commit=False)
+
+        # Log test metrics to TensorBoard
+        self.writer.add_scalar("test/epoch_NLL", metrics[0], self.current_epoch)
+        self.writer.add_scalar("test/X_kl", metrics[1], self.current_epoch)
+        self.writer.add_scalar("test/E_kl", metrics[2], self.current_epoch)
+        self.writer.add_scalar("test/X_logp", metrics[3], self.current_epoch)
+        self.writer.add_scalar("test/E_logp", metrics[4], self.current_epoch)
 
         self.print(f"Epoch {self.current_epoch}: Test NLL {metrics[0] :.2f} -- Test Atom type KL {metrics[1] :.2f} -- ",
                    f"Test Edge type KL: {metrics[2] :.2f}")
 
         test_nll = metrics[0]
-        if wandb.run:
-            wandb.log({"test/epoch_NLL": test_nll}, commit=False)
-
         self.print(f'Test loss: {test_nll :.4f}')
 
         samples_left_to_generate = self.cfg.general.final_model_samples_to_generate
@@ -295,7 +293,6 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.print("Generated graphs Saved. Computing sampling metrics...")
         self.sampling_metrics(samples, self.name, self.current_epoch, self.val_counter, test=True, local_rank=self.local_rank)
         self.print("Done testing.")
-
 
     def kl_prior(self, X, E, node_mask):
         """Computes the KL between q(z1 | x) and the prior p(z1) = Normal(0, 1).
@@ -471,12 +468,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         # Update NLL metric object and return batch nll
         nll = (self.test_nll if test else self.val_nll)(nlls)        # Average over the batch
 
-        if wandb.run:
-            wandb.log({"kl prior": kl_prior.mean(),
-                       "Estimator loss terms": loss_all_t.mean(),
-                       "log_pn": log_pN.mean(),
-                       "loss_term_0": loss_term_0,
-                       'batch_test_nll' if test else 'val_nll': nll}, commit=False)
+        # Log loss terms to TensorBoard
+        self.writer.add_scalar("kl prior", kl_prior.mean(), self.current_epoch)
+        self.writer.add_scalar("Estimator loss terms", loss_all_t.mean(), self.current_epoch)
+        self.writer.add_scalar("log_pn", log_pN.mean(), self.current_epoch)
+        self.writer.add_scalar("loss_term_0", loss_term_0, self.current_epoch)
+        self.writer.add_scalar('batch_test_nll' if test else 'val_nll', nll, self.current_epoch)
+
         return nll
 
     def forward(self, noisy_data, extra_data, node_mask):
@@ -666,3 +664,5 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         extra_y = torch.cat((extra_y, t), dim=1)
 
         return utils.PlaceHolder(X=extra_X, E=extra_E, y=extra_y)
+
+writer.close()
